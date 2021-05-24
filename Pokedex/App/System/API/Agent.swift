@@ -9,12 +9,11 @@ import Foundation
 import Combine
 
 struct Agent {
-    func run<T: Decodable>(_ request: URLRequest) -> AnyPublisher<T, Error> {
+    func run<T: Decodable>(_ url: URLRequest) -> AnyPublisher<T, Error> {
+    
         return URLSession.shared
-            .dataTaskPublisher(for: request)
-            .map { $0.data }
-            .handleEvents(receiveOutput: { print(NSString(data: $0, encoding: String.Encoding.utf8.rawValue)!) })
-            .decode(type: T.self, decoder: JSONDecoder())
+            .dataTaskPublisher(for: url)
+            .tryMap { try JSONDecoder().decode(T.self, from: $0.data) }
             .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()
     }

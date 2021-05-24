@@ -2,7 +2,7 @@
 //  Spinner.swift
 //  Pokedex
 //
-//  Created by Josafat Flores on 20/05/21.
+//  Created by Josafat Flores on 21/05/21.
 //
 
 import SwiftUI

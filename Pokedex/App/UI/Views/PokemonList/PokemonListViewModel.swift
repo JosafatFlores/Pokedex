@@ -9,101 +9,69 @@ import Foundation
 import Combine
 
 final class PokemonListViewModel: ObservableObject {
-    @Published private(set) var state = State.idle
+    @Published private(set) var state = State()
+    private var subscriptions = Set<AnyCancellable>()
     
-    private var bag = Set<AnyCancellable>()
+    var pokemonsFinded = 0
+    var pokemonsTemp: [PokemonDetailStruct] = []
     
-    private let input = PassthroughSubject<Event, Never>()
-    
-    init() {
-        Publishers.system(
-            initial: state,
-            reduce: Self.reduce,
-            scheduler: RunLoop.main,
-            feedbacks: [
-                Self.whenLoading(),
-                Self.userInput(input: input.eraseToAnyPublisher())
-            ]
-        )
-        .assign(to: \.state, on: self)
-        .store(in: &bag)
-    }
-    
-    deinit {
-        bag.removeAll()
-    }
-    
-    func send(event: Event) {
-        input.send(event)
-    }
-}
-
-extension PokemonListViewModel {
-    enum State {
-        case idle
-        case loading
-        case loaded([Results])
-        case error(Error)
-    }
-    
-    enum Event {
-        case onAppear
-        case onSelectPokemon(Int)
-        case onPokemonLoaded([Results])
-        case onFailedToLoadPokemon(Error)
-    }
-    
-    struct Results: Identifiable{
-        let id = UUID()
-        let name: String?
-        let url: String
+    func fetchNextOffSetIfPossible() {
+        guard state.canLoadNextPage else { return }
         
-        init(result: ResultsStruct) {
-            name = result.name ?? ""
-            url = result.url
+        PokemonAPI.fetchPokemon(offSet: state.offSet)
+            .sink(receiveCompletion: onReceive,
+                  receiveValue: onReceivePokemons)
+            .store(in: &subscriptions)
+        state.offSet += 20
+    }
+    
+    private func onReceive(_ completion: Subscribers.Completion<Error>) {
+        switch completion {
+        case .finished:
+            break
+        case .failure:
+            print(completion)
+            state.canLoadNextPage = false
         }
     }
-}
+    
+    private func onReceivePokemons(_ batch: PokemonResponseStruct) {
+        state.pokemons += batch.results
+        state.canLoadNextPage = batch.count > state.offSet
+        for pokemon in batch.results{
+            self.fechtPokemonDetail(url: pokemon.url)
+        }
+    }
+    
+    private func fechtPokemonDetail(url: String){
+        PokemonAPI.fetchPokemonDetail(url: url)
+            .sink(receiveCompletion: onReceive,
+                  receiveValue: onReceivePokemonDetail)
+            .store(in: &subscriptions)
+    }
+    
 
-extension PokemonListViewModel {
-    static func reduce(_ state: State, _ event: Event) -> State {
-        switch state {
-        case .idle:
-            switch event {
-            case .onAppear:
-                return .loading
-            default:
-                return state
-            }
-        case .loading:
-            switch event {
-            case .onFailedToLoadPokemon(let error):
-                return .error(error)
-            case .onPokemonLoaded(let results):
-                return .loaded(results)
-            default:
-                return state
-            }
-        case .loaded:
-            return state
-        case .error:
-            return state
-        }
-    }
-    
-    static func whenLoading() -> Feedback<State, Event> {
-        Feedback { (state: State) -> AnyPublisher<Event, Never> in
-            guard case .loading = state else { return Empty().eraseToAnyPublisher() }
+    private func onReceivePokemonDetail(_ batch: PokemonDetailStruct) {
+       
+        pokemonsFinded += 1
+        pokemonsTemp.append(batch)
+        
+        
+        if pokemonsFinded > 19{
+            pokemonsTemp.sort{$0.id < $1.id}
             
-            return PokemonAPI.fetchPokemon()
-                .map { $0.results.map(Results.init) }
-                .map(Event.onPokemonLoaded)
-                .catch { Just(Event.onFailedToLoadPokemon($0)) }
-                .eraseToAnyPublisher()
+            state.pokemonsDetail += pokemonsTemp
+            pokemonsTemp = []
+            pokemonsFinded = 0
         }
+        
+        
     }
     
-    static func userInput(input: AnyPublisher<Event, Never>) -> Feedback<State, Event> {
-        Feedback { _ in input }
+    struct State {
+        var pokemons: [ResultsStruct] = []
+        var pokemonsDetail: [PokemonDetailStruct] = []
+        var offSet: Int = 0
+        var canLoadNextPage = true
     }
 }
